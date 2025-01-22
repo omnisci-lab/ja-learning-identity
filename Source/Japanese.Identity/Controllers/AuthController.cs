@@ -1,76 +1,60 @@
 ﻿using Japanese.Identity.Models;
+using khothemegiatot.WebApi.Attributes;
+using khothemegiatot.WebApi.Enums;
+using khothemegiatot.WebApi.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
+using System.Net;
 
 namespace Japanese.Identity.Controllers;
 
-[Route("api/auth")]
+[Route("api")]
 [ApiController]
+[HandlerException]
 public class AuthController : ControllerBase
 {
     private readonly UserManager<ApplicationUser> _userManager;
-    private readonly IConfiguration _configuration;
+    private readonly JwtToken _jwtToken;
 
-    public AuthController(UserManager<ApplicationUser> userManager, IConfiguration configuration)
+    public AuthController(UserManager<ApplicationUser> userManager, JwtToken jwtToken)
     {
         _userManager = userManager;
-        _configuration = configuration;
+        _jwtToken = jwtToken;
     }
 
-    [HttpPost("login")]
+    [Route("auth-login")]
+    [HttpPost]
+    [ProducesResponseType(typeof(ExecResult<string>), (int)HttpStatusCode.OK)]
     public async Task<IActionResult> Login([FromBody] LoginModel model)
     {
         ApplicationUser? user = await _userManager.FindByEmailAsync(model.Email);
-        if (user != null && await _userManager.CheckPasswordAsync(user, model.Password))
-        {
-            string token = GenerateJwtToken(user);
-            return Ok(new { Token = token });
-        }
+        if (user is null)
+            return NotFound(new ExecResult { Status = ExecStatus.NotFound });
 
-        return Unauthorized();
+        bool checkPwd = await _userManager.CheckPasswordAsync(user, model.Password);
+        if (!checkPwd)
+            return Unauthorized(new ExecResult { Status = ExecStatus.Failed });
+
+        return Ok(new ExecResult<string> { 
+            Status = ExecStatus.Success, 
+            Data = _jwtToken.Generate(user) 
+        });
     }
 
-    [Route("register")]
+    [Route("auth-register")]
     [HttpPost]
+    [ProducesResponseType(typeof(ExecResult<string>), (int)HttpStatusCode.OK)]
     public async Task<IActionResult> Register([FromBody] RegisterModel model)
     {
         if (!ModelState.IsValid)
-            return BadRequest(ModelState);
+            return BadRequest(new ExecResult { Status = ExecStatus.Invalid });
 
-        var user = new ApplicationUser { UserName = model.Email, Email = model.Email };
+        ApplicationUser user = new ApplicationUser { UserName = model.Email, Email = model.Email };
 
-        var result = await _userManager.CreateAsync(user, model.Password);
+        IdentityResult result = await _userManager.CreateAsync(user, model.Password);
         if (!result.Succeeded)
-            return BadRequest(result.Errors);
+            return BadRequest(new ExecResult { Status = ExecStatus.Failed });
 
-        // Tạo token JWT ngay sau khi đăng ký thành công
-        var token = GenerateJwtToken(user);
-        return Ok(new { Token = token, Message = "User registered successfully" });
-    }
-
-    private string GenerateJwtToken(ApplicationUser user)
-    {
-        var claims = new[]
-        {
-        new Claim(JwtRegisteredClaimNames.Sub, user.Id),
-        new Claim(JwtRegisteredClaimNames.Email, user.Email),
-        new Claim(ClaimTypes.Name, user.UserName)
-    };
-
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]));
-        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-        var token = new JwtSecurityToken(
-            issuer: _configuration["Jwt:Issuer"],
-            audience: _configuration["Jwt:Audience"],
-            claims: claims,
-            expires: DateTime.UtcNow.AddHours(1),
-            signingCredentials: creds);
-
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        return Ok(new ExecResult { Status = ExecStatus.Success });
     }
 }

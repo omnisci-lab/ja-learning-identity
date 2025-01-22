@@ -1,4 +1,5 @@
-﻿using Japanese.Identity.Data;
+﻿using Japanese.Identity;
+using Japanese.Identity.Data;
 using Japanese.Identity.Models;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -17,7 +18,10 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
     .AddEntityFrameworkStores<ApplicationDbContext>()
     .AddDefaultTokenProviders();
 
-byte[] key = Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!);
+
+JwtToken jwt = builder.Configuration.GetSection("Jwt").Get<JwtToken>()!;
+builder.Services.AddSingleton(jwt);
+
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -30,11 +34,11 @@ builder.Services.AddAuthentication(options =>
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(key),
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Key!)),
         ValidateIssuer = true,
         ValidateAudience = true,
-        ValidIssuer = builder.Configuration["Jwt:Issuer"],
-        ValidAudience = builder.Configuration["Jwt:Audience"]
+        ValidIssuer = jwt.Issuer,
+        ValidAudience = jwt.Audience
     };
 });
 
@@ -49,6 +53,32 @@ builder.Services.AddSwaggerGen(options =>
         Title = "Identity",
         Version = "v1",
         Description = "",
+    });
+
+    // Cấu hình Swagger để sử dụng JWT Authorization
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "Bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Nhập token vào ô bên dưới (không cần 'Bearer ' ở đầu)"
+    });
+
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            new string[] { }
+        }
     });
 });
 
